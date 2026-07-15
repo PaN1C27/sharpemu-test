@@ -441,6 +441,29 @@ public static class AgcExports
     }
 
     [SysAbiExport(
+        Nid = "BfBDZGbti7A",
+        ExportName = "sceAgcGetIsTrinityMode",
+        Target = Generation.Gen5,
+        LibraryName = "libSceAgc")]
+    public static int GetIsTrinityMode(CpuContext ctx)
+    {
+        var resultAddress = ctx[CpuRegister.Rdi];
+        if (resultAddress == 0)
+        {
+            return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT);
+        }
+
+        Span<byte> isTrinityMode = stackalloc byte[] { 0 };
+        if (!ctx.Memory.TryWrite(resultAddress, isTrinityMode))
+        {
+            return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+        }
+
+        TraceAgc($"agc.get_is_trinity_mode out=0x{resultAddress:X16} value=false");
+        return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_OK);
+    }
+
+    [SysAbiExport(
         Nid = "2JtWUUiYBXs",
         ExportName = "sceAgcGetRegisterDefaults2",
         Target = Generation.Gen5,
@@ -2411,8 +2434,7 @@ public static class AgcExports
         uint owner;
         lock (state.Gate)
         {
-            if (!state.ResourceRegistrationInitialized ||
-                state.ResourceRegistrationMaxOwners != 0 &&
+            if (state.ResourceRegistrationMaxOwners != 0 &&
                 state.ResourceOwners.Count >= state.ResourceRegistrationMaxOwners)
             {
                 return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT);
@@ -2476,8 +2498,7 @@ public static class AgcExports
         uint resourceHandle;
         lock (state.Gate)
         {
-            if (!state.ResourceRegistrationInitialized ||
-                owner != state.DefaultOwner &&
+            if (owner != state.DefaultOwner &&
                 !state.ResourceOwners.ContainsKey(owner))
             {
                 return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT);
@@ -2515,6 +2536,32 @@ public static class AgcExports
             $"resource=0x{resourceAddress:X16} bytes=0x{resourceSize:X} " +
             $"name={System.Text.Encoding.UTF8.GetString(nameBytes)} type={type} flags={flags}");
 
+        return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_OK);
+    }
+
+    [SysAbiExport(
+        Nid = "XlNp7jzGiPo",
+        ExportName = "sceAgcDriverSetTFRing",
+        Target = Generation.Gen5,
+        LibraryName = "libSceAgc")]
+    public static int DriverSetTfRing(CpuContext ctx)
+    {
+        TraceAgc(
+            $"agc.driver_set_tf_ring address=0x{ctx[CpuRegister.Rdi]:X16} " +
+            $"size=0x{ctx[CpuRegister.Rsi]:X16} param=0x{ctx[CpuRegister.Rdx]:X16}");
+        return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_OK);
+    }
+
+    [SysAbiExport(
+        Nid = "MM4IZSEYytQ",
+        ExportName = "sceAgcDriverSetHsOffchipParam",
+        Target = Generation.Gen5,
+        LibraryName = "libSceAgc")]
+    public static int DriverSetHsOffchipParam(CpuContext ctx)
+    {
+        TraceAgc(
+            $"agc.driver_set_hs_offchip_param address=0x{ctx[CpuRegister.Rdi]:X16} " +
+            $"size=0x{ctx[CpuRegister.Rsi]:X16} param=0x{ctx[CpuRegister.Rdx]:X16}");
         return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_OK);
     }
 

@@ -23,6 +23,9 @@ public static class VideoOutExports
     private const int OrbisVideoOutErrorInvalidEvent = unchecked((int)0x8029000D);
     private const int OrbisVideoOutErrorInvalidOption = unchecked((int)0x8029001A);
     private const int SceVideoOutBusTypeMain = 0;
+    private const int SceVideoOutBufferCategoryUncompressed = 0;
+    private const int SceVideoOutBufferCategoryCompressed = 1;
+    private const int SceVideoOutTrue = 1;
     private const int SceVideoOutBufferAttributeOptionNone = 0;
     private const int SceVideoOutTilingModeLinear = 1;
     private const int MaxOpenPorts = 4;
@@ -297,6 +300,7 @@ public static class VideoOutExports
     {
         public required int Index { get; init; }
         public required BufferAttribute Attribute { get; init; }
+        public required int Category { get; init; }
     }
 
     private sealed class VideoOutBufferSlot
@@ -304,6 +308,7 @@ public static class VideoOutExports
         public int GroupIndex { get; set; } = -1;
         public ulong AddressLeft { get; set; }
         public ulong AddressRight { get; set; }
+        public ulong MetadataAddress { get; set; }
     }
 
     private readonly record struct FlipEventRegistration(ulong Equeue, ulong UserData);
@@ -429,6 +434,24 @@ public static class VideoOutExports
         }
 
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "Nv8c-Kb+DUM",
+        ExportName = "sceVideoOutIsOutputSupported",
+        Target = Generation.Gen5,
+        LibraryName = "libSceVideoOut")]
+    public static int VideoOutIsOutputSupported(CpuContext ctx)
+    {
+        var handle = unchecked((int)ctx[CpuRegister.Rdi]);
+        var requestType = unchecked((uint)ctx[CpuRegister.Rsi]);
+        if (!TryGetPort(handle, out _))
+        {
+            return ctx.SetReturn(OrbisVideoOutErrorInvalidHandle);
+        }
+
+        TraceVideoOut($"videoout.is_output_supported handle={handle} request={requestType} supported=true");
+        return ctx.SetReturn(SceVideoOutTrue);
     }
 
     [SysAbiExport(
@@ -874,6 +897,7 @@ public static class VideoOutExports
                     slot.GroupIndex = -1;
                     slot.AddressLeft = 0;
                     slot.AddressRight = 0;
+                    slot.MetadataAddress = 0;
                 }
             }
 
@@ -939,6 +963,11 @@ public static class VideoOutExports
         {
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
         }
+
+        TraceVideoOut(
+            $"videoout.set_buffer_attribute2 out=0x{attributeAddress:X16} fmt=0x{pixelFormat:X16} " +
+            $"tile={tilingMode} size={width}x{height} option=0x{option:X16} " +
+            $"dcc_control=0x{dccControl:X8} dcc_clear=0x{dccClearColor:X16}");
 
         if (attributeAddress == 0)
         {
@@ -1030,6 +1059,11 @@ public static class VideoOutExports
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
         }
 
+        TraceVideoOut(
+            $"videoout.register_buffers2.request handle={handle} group={setIndex} start={bufferIndexStart} " +
+            $"buffers=0x{buffersAddress:X16} count={bufferNum} attribute=0x{attributeAddress:X16} " +
+            $"category=0x{categoryRaw:X16} option=0x{option:X16}");
+
         if (!TryGetPort(handle, out var port))
         {
             return OrbisVideoOutErrorInvalidHandle;
@@ -1050,7 +1084,8 @@ public static class VideoOutExports
             return OrbisVideoOutErrorInvalidValue;
         }
 
-        if (categoryRaw != 0 || option != 0)
+        if (categoryRaw is not (SceVideoOutBufferCategoryUncompressed or SceVideoOutBufferCategoryCompressed) ||
+            option != 0)
         {
             return OrbisVideoOutErrorInvalidValue;
         }
@@ -1061,18 +1096,26 @@ public static class VideoOutExports
         }
 
         Span<ulong> addresses = stackalloc ulong[Math.Min(bufferNum, MaxDisplayBuffers)];
+        Span<ulong> metadataAddresses = stackalloc ulong[Math.Min(bufferNum, MaxDisplayBuffers)];
         for (var i = 0; i < bufferNum; i++)
         {
             var entryAddress = buffersAddress + ((ulong)i * VideoOutBuffersEntrySize);
             if (!ctx.TryReadUInt64(entryAddress + 0x00, out addresses[i]) ||
-                !ctx.TryReadUInt64(entryAddress + 0x08, out _))
+                !ctx.TryReadUInt64(entryAddress + 0x08, out metadataAddresses[i]))
             {
                 return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
             }
         }
 
-        var groupIndex = RegisterBufferRange(port, bufferIndexStart, addresses[..bufferNum], attribute, setIndex);
-        return groupIndex < 0 ? groupIndex : setIndex;
+        var groupIndex = RegisterBufferRange(
+            port,
+            bufferIndexStart,
+            addresses[..bufferNum],
+            attribute,
+            setIndex,
+            metadataAddresses[..bufferNum],
+            unchecked((int)categoryRaw));
+        return groupIndex < 0 ? groupIndex : (int)OrbisGen2Result.ORBIS_GEN2_OK;
     }
 
     private static void SignalVblank(VideoOutPortState port)
@@ -1222,7 +1265,29 @@ public static class VideoOutExports
             $"vblank_missed={missedEdges}");
     }
 
-    private static int RegisterBufferRange(VideoOutPortState port, int startIndex, ReadOnlySpan<ulong> addresses, BufferAttribute attribute, int requestedGroupIndex = -1)
+    private static int RegisterBufferRange(
+        VideoOutPortState port,
+        int startIndex,
+        ReadOnlySpan<ulong> addresses,
+        BufferAttribute attribute,
+        int requestedGroupIndex = -1) =>
+        RegisterBufferRange(
+            port,
+            startIndex,
+            addresses,
+            attribute,
+            requestedGroupIndex,
+            default,
+            SceVideoOutBufferCategoryUncompressed);
+
+    private static int RegisterBufferRange(
+        VideoOutPortState port,
+        int startIndex,
+        ReadOnlySpan<ulong> addresses,
+        BufferAttribute attribute,
+        int requestedGroupIndex,
+        ReadOnlySpan<ulong> metadataAddresses,
+        int category)
     {
         lock (_stateGate)
         {
@@ -1249,6 +1314,7 @@ public static class VideoOutExports
             {
                 Index = groupIndex,
                 Attribute = attribute,
+                Category = category,
             };
             port.OutputWidth = attribute.Width;
             port.OutputHeight = attribute.Height;
@@ -1259,10 +1325,13 @@ public static class VideoOutExports
                 slot.GroupIndex = groupIndex;
                 slot.AddressLeft = addresses[i];
                 slot.AddressRight = 0;
+                slot.MetadataAddress = metadataAddresses.IsEmpty ? 0 : metadataAddresses[i];
             }
 
             TraceVideoOut(
-                $"videoout.register_buffers handle={port.Handle} group={groupIndex} start={startIndex} count={addresses.Length} fmt=0x{attribute.PixelFormat:X} tile={attribute.TilingMode} {attribute.Width}x{attribute.Height} pitch={attribute.PitchInPixel}");
+                $"videoout.register_buffers handle={port.Handle} group={groupIndex} start={startIndex} " +
+                $"count={addresses.Length} category={category} fmt=0x{attribute.PixelFormat:X} " +
+                $"tile={attribute.TilingMode} {attribute.Width}x{attribute.Height} pitch={attribute.PitchInPixel}");
             VulkanVideoPresenter.EnsureStarted(attribute.Width, attribute.Height);
 
             var guestFormat = MapPixelFormatToGuestTextureFormat(attribute.PixelFormat);
@@ -1525,13 +1594,13 @@ public static class VideoOutExports
         }
 
         var high = (uint)(pixelFormat >> 32);
-        if (GetBytesPerPixel(high) != 0)
+        var packed = high | (low >> 16);
+        if (GetBytesPerPixel(packed) != 0)
         {
-            return high;
+            return packed;
         }
 
-        var packed = high | (low >> 16);
-        return GetBytesPerPixel(packed) != 0 ? packed : pixelFormat;
+        return GetBytesPerPixel(high) != 0 ? high : pixelFormat;
     }
 
     private static void ConvertRowToRgb(ReadOnlySpan<byte> source, Span<byte> destination, ulong pixelFormat)

@@ -148,16 +148,16 @@ public static class UserServiceExports
     {
         // Return deterministic defaults for the offline profile.
         var userId = unchecked((int)ctx[CpuRegister.Rdi]);
-        var resultAddress = ctx[CpuRegister.Rcx];
-        Span<byte> defaults = stackalloc byte[0x18];
+        var resultAddress = ctx[CpuRegister.Rsi];
+        Span<byte> defaults = stackalloc byte[0x20];
+        defaults.Clear();
         if (resultAddress == 0 || !ctx.Memory.TryWrite(resultAddress, defaults))
         {
             return ctx.SetReturn(OrbisUserServiceErrorInvalidArgument);
         }
 
         TraceUserService(
-            $"get_game_presets user={userId} title=0x{ctx[CpuRegister.Rsi]:X16} " +
-            $"key=0x{ctx[CpuRegister.R9]:X} out=0x{resultAddress:X16} result=0x00000000");
+            $"get_game_presets user={userId} out=0x{resultAddress:X16} result=0x00000000");
         return ctx.SetReturn(0);
     }
 
