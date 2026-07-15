@@ -329,11 +329,6 @@ public sealed class SelfLoader : ISelfLoader
         if (magic is Ps4SelfMagic or Ps5SelfMagic)
         {
             var selfHeader = ReadUnmanaged<SelfHeader>(imageData, 0);
-            if (!selfHeader.HasKnownLayout || selfHeader.Unknown != 0x22)
-            {
-                throw new InvalidDataException("SELF header signature is not recognized.");
-            }
-
             var segmentCount = selfHeader.SegmentCount;
             var elfOffset = checked(SelfHeaderSize + (segmentCount * SelfSegmentSize));
             EnsureRange(imageData.Length, (ulong)elfOffset, (ulong)Unsafe.SizeOf<ElfHeader>());
@@ -2363,48 +2358,18 @@ public sealed class SelfLoader : ISelfLoader
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     private readonly struct SelfHeader
     {
-        private readonly byte _ident0;
-        private readonly byte _ident1;
-        private readonly byte _ident2;
-        private readonly byte _ident3;
-        private readonly byte _ident4;
-        private readonly byte _ident5;
-        private readonly byte _ident6;
-        private readonly byte _ident7;
-        private readonly byte _ident8;
-        private readonly byte _ident9;
-        private readonly byte _ident10;
-        private readonly byte _ident11;
-        private readonly ushort _size1;
-        private readonly ushort _size2;
-        private readonly ulong _fileSize;
-        private readonly ushort _segmentCount;
-        private readonly ushort _unknown;
-        private readonly uint _padding;
-
-        public ushort SegmentCount => _segmentCount;
-
-        public ushort Unknown => _unknown;
-
-        public ulong FileSize => _fileSize;
-
-        public bool HasKnownLayout =>
-            ((_ident0 == 0x4F &&
-              _ident1 == 0x15 &&
-              _ident2 == 0x3D &&
-              _ident3 == 0x1D) ||
-             (_ident0 == 0x54 &&
-              _ident1 == 0x14 &&
-              _ident2 == 0xF5 &&
-              _ident3 == 0xEE)) &&
-            _ident4 == 0x00 &&
-            _ident5 == 0x01 &&
-            _ident6 == 0x01 &&
-            _ident7 == 0x12 &&
-            _ident8 == 0x01 &&
-            _ident9 == 0x01 &&
-            _ident10 == 0x00 &&
-            _ident11 == 0x00;
+        public readonly uint Magic;
+        public readonly byte Version;
+        public readonly byte Mode;
+        public readonly byte Endian;
+        public readonly byte Attributes;
+        public readonly uint KeyType;
+        public readonly ushort HeaderSize;
+        public readonly ushort MetaSize;
+        public readonly ulong FileSize;
+        public readonly ushort SegmentCount;
+        public readonly ushort Flags;
+        public readonly uint Reserved;
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
