@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using SharpEmu.HLE;
-using SharpEmu.Libs.Agc;
 using Xunit;
 
 namespace SharpEmu.Libs.Tests.Compatibility;
@@ -45,7 +44,8 @@ public sealed class HardwareModeExportsTests
     private static ModuleManager CreateRegisteredManager()
     {
         var manager = new ModuleManager();
-        manager.RegisterFromAssembly(typeof(AgcExports).Assembly, Generation.Gen5);
+        manager.RegisterExports(
+            SharpEmu.Generated.SysAbiExportRegistry.CreateExports(Generation.Gen5));
         return manager;
     }
 }

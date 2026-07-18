@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using SharpEmu.HLE;
-using SharpEmu.Libs.Np;
 using System.Buffers.Binary;
 using Xunit;
 
@@ -135,7 +134,8 @@ public sealed class NpTrophy2ExportsTests
     private static ModuleManager CreateRegisteredManager()
     {
         var manager = new ModuleManager();
-        manager.RegisterFromAssembly(typeof(NpTrophy2Exports).Assembly, Generation.Gen5);
+        manager.RegisterExports(
+            SharpEmu.Generated.SysAbiExportRegistry.CreateExports(Generation.Gen5));
         return manager;
     }
 }

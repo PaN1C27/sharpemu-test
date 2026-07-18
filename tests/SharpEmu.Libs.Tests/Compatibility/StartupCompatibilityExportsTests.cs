@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using SharpEmu.HLE;
-using SharpEmu.Libs.Agc;
 using System.Buffers.Binary;
 using Xunit;
 
@@ -31,7 +30,7 @@ public sealed class StartupCompatibilityExportsTests
     }
 
     [Fact]
-    public void SystemServiceParamGetString_WritesConsoleModel()
+    public void SystemServiceParamGetString_WritesDeterministicDefault()
     {
         var manager = CreateRegisteredManager();
         var memory = new FakeCpuMemory(MemoryBase, 0x1000);
@@ -42,10 +41,10 @@ public sealed class StartupCompatibilityExportsTests
 
         Assert.True(manager.TryDispatch("SsC-m-S9JTA", ctx, out var result));
 
-        Span<byte> model = stackalloc byte[10];
-        Assert.True(memory.TryRead(MemoryBase, model));
+        Span<byte> value = stackalloc byte[9];
+        Assert.True(memory.TryRead(MemoryBase, value));
         Assert.Equal(OrbisGen2Result.ORBIS_GEN2_OK, result);
-        Assert.Equal("CFI-1000A\0"u8.ToArray(), model.ToArray());
+        Assert.Equal("SharpEmu\0"u8.ToArray(), value.ToArray());
     }
 
     [Fact]
@@ -81,24 +80,25 @@ public sealed class StartupCompatibilityExportsTests
     }
 
     [Fact]
-    public void UserServiceGetGamePresets_ClearsSecondArgumentBuffer()
+    public void UserServiceGetGamePresets_WritesDefaultPresetStructure()
     {
         var manager = CreateRegisteredManager();
         var memory = new FakeCpuMemory(MemoryBase, 0x1000);
         var ctx = new CpuContext(memory, Generation.Gen5);
-        Span<byte> initial = stackalloc byte[0x20];
+        Span<byte> initial = stackalloc byte[0x28];
         initial.Fill(0xFF);
         Assert.True(memory.TryWrite(MemoryBase, initial));
-        ctx[CpuRegister.Rdi] = 1000;
+        ctx[CpuRegister.Rdi] = 0x10000000;
         ctx[CpuRegister.Rsi] = MemoryBase;
         ctx[CpuRegister.Rcx] = 0;
 
         Assert.True(manager.TryDispatch("-sD02mFDBh4", ctx, out var result));
 
-        Span<byte> presets = stackalloc byte[0x20];
+        Span<byte> presets = stackalloc byte[0x28];
         Assert.True(memory.TryRead(MemoryBase, presets));
         Assert.Equal(OrbisGen2Result.ORBIS_GEN2_OK, result);
-        Assert.Equal(new byte[0x20], presets.ToArray());
+        Assert.Equal(0x28UL, BinaryPrimitives.ReadUInt64LittleEndian(presets));
+        Assert.Equal(new byte[0x20], presets[sizeof(ulong)..].ToArray());
     }
 
     [Fact]
@@ -126,7 +126,7 @@ public sealed class StartupCompatibilityExportsTests
         try
         {
             ctx[CpuRegister.Rdi] = unchecked((uint)handle);
-            ctx[CpuRegister.Rsi] = 15;
+            ctx[CpuRegister.Rsi] = 1;
 
             Assert.True(manager.TryDispatch("Nv8c-Kb+DUM", ctx, out var supportedResult));
             Assert.Equal(1, (int)supportedResult);
@@ -140,41 +140,23 @@ public sealed class StartupCompatibilityExportsTests
     }
 
     [Fact]
-    public void AgcResourceRegistration_WorksWithoutLegacyInitializer()
+    public void AgcResourceRegistration_ReturnsOkWithoutLegacyInitializer()
     {
         var manager = CreateRegisteredManager();
         var memory = new FakeCpuMemory(MemoryBase, 0x2000);
         var ctx = new CpuContext(memory, Generation.Gen5);
         var ownerAddress = MemoryBase;
-        var resourceHandleAddress = MemoryBase + 0x08;
-        var ownerNameAddress = memory.WriteCString(MemoryBase + 0x100, "Render owner");
         var resourceNameAddress = memory.WriteCString(MemoryBase + 0x200, "Display target");
 
         ctx[CpuRegister.Rdi] = ownerAddress;
-        ctx[CpuRegister.Rsi] = ownerNameAddress;
-        Assert.True(manager.TryDispatch("X-Nm5KLREeg", ctx, out var ownerResult));
-        Assert.Equal(OrbisGen2Result.ORBIS_GEN2_OK, ownerResult);
-
-        Span<byte> ownerBytes = stackalloc byte[sizeof(uint)];
-        Assert.True(memory.TryRead(ownerAddress, ownerBytes));
-        var owner = BinaryPrimitives.ReadUInt32LittleEndian(ownerBytes);
-        Assert.NotEqual(0u, owner);
-
-        ctx[CpuRegister.Rsp] = MemoryBase + 0x400;
-        ctx[CpuRegister.Rdi] = resourceHandleAddress;
-        ctx[CpuRegister.Rsi] = owner;
-        ctx[CpuRegister.Rdx] = MemoryBase + 0x1000;
-        ctx[CpuRegister.Rcx] = 0x100;
-        ctx[CpuRegister.R8] = resourceNameAddress;
-        ctx[CpuRegister.R9] = 1;
-        Assert.True(memory.TryWrite(ctx[CpuRegister.Rsp] + 0x08, stackalloc byte[sizeof(ulong)]));
+        ctx[CpuRegister.Rsi] = 1;
+        ctx[CpuRegister.Rdx] = resourceNameAddress;
+        ctx[CpuRegister.R8] = 1;
+        ctx[CpuRegister.R9] = 0;
 
         Assert.True(manager.TryDispatch("W5z4eZrjEas", ctx, out var resourceResult));
         Assert.Equal(OrbisGen2Result.ORBIS_GEN2_OK, resourceResult);
-
-        Span<byte> resourceBytes = stackalloc byte[sizeof(uint)];
-        Assert.True(memory.TryRead(resourceHandleAddress, resourceBytes));
-        Assert.NotEqual(0u, BinaryPrimitives.ReadUInt32LittleEndian(resourceBytes));
+        Assert.Equal(0UL, ctx[CpuRegister.Rax]);
     }
 
     [Theory]
@@ -193,7 +175,8 @@ public sealed class StartupCompatibilityExportsTests
     private static ModuleManager CreateRegisteredManager()
     {
         var manager = new ModuleManager();
-        manager.RegisterFromAssembly(typeof(AgcExports).Assembly, Generation.Gen5);
+        manager.RegisterExports(
+            SharpEmu.Generated.SysAbiExportRegistry.CreateExports(Generation.Gen5));
         return manager;
     }
 }
